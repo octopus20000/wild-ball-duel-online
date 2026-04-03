@@ -1,5 +1,5 @@
 const { contextBridge } = require("electron");
 
-contextBridge.exposeInMainWorld("arcaneShell", {
+contextBridge.exposeInMainWorld("wildBallTacticsShell", {
   platform: "desktop"
 });

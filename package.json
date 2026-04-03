@@ -1,7 +1,7 @@
 {
-  "name": "arcane-duel-turn-based-online",
+  "name": "wild-ball-tactics-online",
   "version": "1.0.0",
-  "description": "回合制多人線上對戰遊戲",
+  "description": "回合制戰術球鬥多人線上遊戲",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -17,15 +17,14 @@ function resolveServerUrl() {
 
 function createWindow() {
   const targetUrl = resolveServerUrl();
-
   const win = new BrowserWindow({
-    width: 1360,
-    height: 900,
-    minWidth: 1100,
+    width: 1420,
+    height: 940,
+    minWidth: 1160,
     minHeight: 760,
     show: false,
-    backgroundColor: "#0b1120",
-    title: "Arcane Duel Online",
+    backgroundColor: "#08101d",
+    title: "Wild Ball Tactics Online",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

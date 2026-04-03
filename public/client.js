@@ -2,8 +2,10 @@ const socket = io();
 
 const state = {
   room: null,
-  selectedAction: null,
-  youReady: false
+  selectedLane: "mid",
+  selectedAction: "drive",
+  selectedCardId: null,
+  selectedTargetLane: "mid"
 };
 
 const el = {
@@ -24,6 +26,8 @@ const el = {
   rightHp: document.getElementById("rightHp"),
   leftEnergy: document.getElementById("leftEnergy"),
   rightEnergy: document.getElementById("rightEnergy"),
+  leftScore: document.getElementById("leftScore"),
+  rightScore: document.getElementById("rightScore"),
   leftHpBar: document.getElementById("leftHpBar"),
   rightHpBar: document.getElementById("rightHpBar"),
   leftEnergyBar: document.getElementById("leftEnergyBar"),
@@ -32,14 +36,39 @@ const el = {
   rightStatus: document.getElementById("rightStatus"),
   turnNumber: document.getElementById("turnNumber"),
   youBox: document.getElementById("youBox"),
-  actionsWrap: document.getElementById("actionsWrap"),
-  submitActionBtn: document.getElementById("submitActionBtn"),
-  selectedActionText: document.getElementById("selectedActionText"),
+  laneNodes: Array.from(document.querySelectorAll(".lane")),
+  laneSelect: document.getElementById("laneSelect"),
+  actionGrid: document.getElementById("actionGrid"),
+  cardGrid: document.getElementById("cardGrid"),
+  targetLaneSelect: document.getElementById("targetLaneSelect"),
+  submitTurnBtn: document.getElementById("submitTurnBtn"),
+  selectionSummary: document.getElementById("selectionSummary"),
   readyBtn: document.getElementById("readyBtn"),
   rematchBtn: document.getElementById("rematchBtn"),
   logList: document.getElementById("logList"),
-  toastContainer: document.getElementById("toastContainer"),
-  actionBtns: Array.from(document.querySelectorAll(".action-btn"))
+  toastContainer: document.getElementById("toastContainer")
+};
+
+const laneLabel = {
+  up: "上路",
+  mid: "中路",
+  down: "下路"
+};
+
+const actionLabel = {
+  drive: "抽射",
+  power: "爆射",
+  curve: "曲球",
+  guard: "封堵",
+  charge: "蓄力"
+};
+
+const actionDesc = {
+  drive: "穩定進攻，若命中可得分。",
+  power: "耗 2 能量，威力更強。",
+  curve: "耗 1 能量，可改變球路。",
+  guard: "若對到正確路線可封堵來球。",
+  charge: "獲得更多能量，準備大招。"
 };
 
 function clamp(v, min, max) {
@@ -62,28 +91,105 @@ function phaseText(phase, winner) {
   if (phase === "lobby") return "大廳中";
   if (phase === "playing") return "對戰中";
   if (phase === "ended") {
-    if (winner === "draw") return "平手";
-    return winner === "left" ? "左側獲勝" : "右側獲勝";
+    if (winner === "left") return "左側獲勝";
+    if (winner === "right") return "右側獲勝";
   }
   return phase;
 }
 
 function sideStatus(player, phase) {
   if (!player.connected) return "已離線";
-  if (phase === "lobby") return player.isReady ? "已準備" : "等待準備";
-  if (phase === "playing") return player.submitted ? "已鎖定動作" : "思考中";
+  if (phase === "lobby") return player.ready ? "已準備" : "等待準備";
+  if (phase === "playing") return player.submitted ? "已鎖定本回合戰術" : "思考中";
   if (phase === "ended") return player.rematchVote ? "已投票再戰" : "等待再戰";
   return "";
 }
 
-function actionLabel(action) {
-  return {
-    attack: "普通攻擊",
-    guard: "防禦",
-    charge: "蓄力",
-    special: "強襲",
-    heal: "治療"
-  }[action] || action;
+function renderLaneSelectors() {
+  el.laneSelect.innerHTML = "";
+  ["up", "mid", "down"].forEach((lane) => {
+    const btn = document.createElement("button");
+    btn.className = `pick ${state.selectedLane === lane ? "active" : ""}`;
+    btn.innerHTML = `<strong>${laneLabel[lane]}</strong><small>站到這一路等待接球或防守。</small>`;
+    btn.addEventListener("click", () => {
+      state.selectedLane = lane;
+      renderSelections();
+    });
+    el.laneSelect.appendChild(btn);
+  });
+
+  el.targetLaneSelect.innerHTML = "";
+  ["up", "mid", "down"].forEach((lane) => {
+    const btn = document.createElement("button");
+    btn.className = `pick ${state.selectedTargetLane === lane ? "active" : ""}`;
+    btn.innerHTML = `<strong>${laneLabel[lane]}</strong><small>曲球成功時將球導向這一路。</small>`;
+    btn.addEventListener("click", () => {
+      state.selectedTargetLane = lane;
+      renderSelections();
+    });
+    el.targetLaneSelect.appendChild(btn);
+  });
+}
+
+function renderActions() {
+  el.actionGrid.innerHTML = "";
+  ["drive", "power", "curve", "guard", "charge"].forEach((action) => {
+    const btn = document.createElement("button");
+    btn.className = `pick ${state.selectedAction === action ? "active" : ""}`;
+    btn.innerHTML = `<strong>${actionLabel[action]}</strong><small>${actionDesc[action]}</small>`;
+    btn.addEventListener("click", () => {
+      state.selectedAction = action;
+      renderSelections();
+    });
+    el.actionGrid.appendChild(btn);
+  });
+}
+
+function renderCards() {
+  el.cardGrid.innerHTML = "";
+  const me = state.room?.you ? state.room.players[state.room.you] : null;
+  const deck = me?.deck || [];
+  if (!deck.length) {
+    const empty = document.createElement("div");
+    empty.className = "pick";
+    empty.innerHTML = "<strong>沒有戰術卡</strong><small>本局目前沒有可用的戰術卡。</small>";
+    el.cardGrid.appendChild(empty);
+    return;
+  }
+
+  const noneBtn = document.createElement("button");
+  noneBtn.className = `pick ${state.selectedCardId === null ? "active" : ""}`;
+  noneBtn.innerHTML = "<strong>不使用</strong><small>本回合不啟用戰術卡。</small>";
+  noneBtn.addEventListener("click", () => {
+    state.selectedCardId = null;
+    renderSelections();
+  });
+  el.cardGrid.appendChild(noneBtn);
+
+  deck.forEach((card) => {
+    const btn = document.createElement("button");
+    btn.className = `pick ${state.selectedCardId === card.id ? "active" : ""}`;
+    btn.innerHTML = `<strong>${card.name}</strong><small>${card.desc}</small>`;
+    btn.addEventListener("click", () => {
+      state.selectedCardId = card.id;
+      renderSelections();
+    });
+    el.cardGrid.appendChild(btn);
+  });
+}
+
+function renderSelections() {
+  renderLaneSelectors();
+  renderActions();
+  renderCards();
+
+  el.selectionSummary.textContent =
+    `站位：${laneLabel[state.selectedLane]}｜球技：${actionLabel[state.selectedAction]}` +
+    `${state.selectedAction === "curve" ? `｜目標：${laneLabel[state.selectedTargetLane]}` : ""}` +
+    `${state.selectedCardId ? `｜戰術卡：${state.selectedCardId}` : ""}`;
+
+  const me = state.room?.you ? state.room.players[state.room.you] : null;
+  el.submitTurnBtn.disabled = !(state.room?.phase === "playing" && me && !me.submitted);
 }
 
 function renderRoom(room) {
@@ -95,57 +201,39 @@ function renderRoom(room) {
   el.roomCode.textContent = room.code;
   el.phasePill.textContent = phaseText(room.phase, room.winner);
   el.turnNumber.textContent = room.phase === "lobby" ? "-" : room.turn;
-  el.youBox.textContent = room.you === "left" ? "你是左側（房主）" : room.you === "right" ? "你是右側（挑戰者）" : "觀察中";
+  el.youBox.textContent = room.you === "left" ? "你是左側（房主）" : room.you === "right" ? "你是右側（挑戰者）" : "尚未入座";
 
-  const L = room.players.left;
-  const R = room.players.right;
+  const left = room.players.left;
+  const right = room.players.right;
 
-  el.leftName.textContent = L.name;
-  el.rightName.textContent = R.name;
+  el.leftName.textContent = left.name;
+  el.rightName.textContent = right.name;
+  el.leftHp.textContent = left.hp;
+  el.rightHp.textContent = right.hp;
+  el.leftEnergy.textContent = left.energy;
+  el.rightEnergy.textContent = right.energy;
+  el.leftScore.textContent = left.score;
+  el.rightScore.textContent = right.score;
 
-  el.leftHp.textContent = L.hp;
-  el.rightHp.textContent = R.hp;
-  el.leftEnergy.textContent = L.energy;
-  el.rightEnergy.textContent = R.energy;
+  updateBar(el.leftHpBar, left.hp / 7);
+  updateBar(el.rightHpBar, right.hp / 7);
+  updateBar(el.leftEnergyBar, left.energy / 5);
+  updateBar(el.rightEnergyBar, right.energy / 5);
 
-  updateBar(el.leftHpBar, L.hp / 24);
-  updateBar(el.rightHpBar, R.hp / 24);
-  updateBar(el.leftEnergyBar, L.energy / 5);
-  updateBar(el.rightEnergyBar, R.energy / 5);
+  el.leftStatus.textContent = sideStatus(left, room.phase);
+  el.rightStatus.textContent = sideStatus(right, room.phase);
 
-  el.leftStatus.textContent = sideStatus(L, room.phase);
-  el.rightStatus.textContent = sideStatus(R, room.phase);
+  el.laneNodes.forEach((node) => {
+    node.classList.toggle("active", node.dataset.lane === room.ballLane);
+  });
 
   const me = room.you ? room.players[room.you] : null;
-  const canSubmit = room.phase === "playing" && me && !me.submitted;
-  el.actionsWrap.classList.toggle("hidden", room.phase !== "playing");
-  el.submitActionBtn.disabled = !canSubmit || !state.selectedAction;
-
   el.readyBtn.classList.toggle("hidden", room.phase !== "lobby");
-  el.readyBtn.textContent = me?.isReady ? "取消準備" : "準備";
-
+  el.readyBtn.textContent = me?.ready ? "取消準備" : "準備";
   el.rematchBtn.classList.toggle("hidden", room.phase !== "ended");
   el.rematchBtn.disabled = !me || me.rematchVote;
 
-  if (room.phase === "ended" && room.winner) {
-    if (room.winner === "draw") {
-      toast("本局平手。", "info");
-    } else if (room.winner === room.you) {
-      toast("你獲勝了！", "success");
-    } else if (room.you) {
-      toast("你落敗了。", "error");
-    }
-  }
-
-  el.actionBtns.forEach((btn) => {
-    const active = btn.dataset.action === state.selectedAction;
-    btn.classList.toggle("active", active);
-    btn.disabled = room.phase !== "playing" || !me || me.submitted;
-  });
-
-  el.selectedActionText.textContent = state.selectedAction
-    ? `目前選擇：${actionLabel(state.selectedAction)}`
-    : "尚未選擇";
+  renderSelections();
 
   el.logList.innerHTML = "";
   room.log.forEach((item) => {
@@ -154,6 +242,11 @@ function renderRoom(room) {
     div.innerHTML = `<strong>${item.title}</strong><div>${item.detail}</div>`;
     el.logList.appendChild(div);
   });
+
+  if (room.phase === "ended" && room.winner) {
+    if (room.winner === room.you) toast("你獲勝了！", "success");
+    else if (room.you) toast("你落敗了。", "error");
+  }
 }
 
 el.createRoomBtn.addEventListener("click", () => {
@@ -173,33 +266,27 @@ el.copyCodeBtn.addEventListener("click", async () => {
     await navigator.clipboard.writeText(state.room.code);
     toast("房號已複製。", "success");
   } catch {
-    toast("複製失敗，請手動複製。", "error");
+    toast("複製失敗。", "error");
   }
 });
 
 el.readyBtn.addEventListener("click", () => {
   if (!state.room || !state.room.you) return;
   const me = state.room.players[state.room.you];
-  socket.emit("player:ready", { ready: !me.isReady });
+  socket.emit("player:ready", { ready: !me.ready });
 });
 
-el.submitActionBtn.addEventListener("click", () => {
-  if (!state.selectedAction) {
-    toast("請先選擇動作。", "error");
-    return;
-  }
-  socket.emit("turn:submit", { action: state.selectedAction });
+el.submitTurnBtn.addEventListener("click", () => {
+  socket.emit("turn:submit", {
+    lane: state.selectedLane,
+    action: state.selectedAction,
+    cardId: state.selectedCardId,
+    targetLane: state.selectedTargetLane
+  });
 });
 
 el.rematchBtn.addEventListener("click", () => {
   socket.emit("match:rematch");
-});
-
-el.actionBtns.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    state.selectedAction = btn.dataset.action;
-    if (state.room) renderRoom(state.room);
-  });
 });
 
 socket.on("connect", () => {
