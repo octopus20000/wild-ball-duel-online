@@ -10,7 +10,7 @@ const state = {
   rebinding: null, pauseOpen: false, keybinds: loadKeybinds(),
   input: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false },
   snapshots: [],
-  renderDelayMs: 55,
+  renderDelayMs: 25,
   lastFrameAt: performance.now(),
   predictedLocal: null,
   predictedTimers: { dashUntil: 0, dashCooldownUntil: 0 },
@@ -112,10 +112,7 @@ function updateKeybindUI() {
 function emitInput() {
   if (!state.roomId) return;
   const seq = ++state.inputSeq;
-  const snapshot = { ...state.input };
-  const stamped = { seq, sentAt: performance.now(), input: snapshot };
-  state.pendingInputs.push(stamped);
-  socket.emit('player:input', { seq, ...snapshot });
+  socket.emit('player:input', { seq, ...state.input });
 }
 function setInputFromEvent(code, isDown) {
   for (const action of ACTIONS) if (state.keybinds[action] === code) state.input[action] = isDown;
@@ -175,47 +172,34 @@ function applyPredictedStep(local, timers, input, prevInput, dtMs, nowMs) {
 function reconcileLocalFromServer(payload) {
   if (!payload.mySide) return;
   const auth = payload.players[payload.mySide];
-  const ack = payload.lastProcessedInputSeq || 0;
-  state.lastAckSeq = ack;
-  state.pendingInputs = state.pendingInputs.filter(entry => entry.seq > ack);
+  state.lastAckSeq = payload.lastProcessedInputSeq || 0;
 
   const now = performance.now();
-  const baseLocal = { x: auth.x, y: auth.y };
-  const baseTimers = {
-    dashCooldownUntil: now + (auth.dashCooldownRemainMs || 0),
-    dashUntil: auth.dashing ? now + 140 : 0
-  };
-
-  let replayPrev = { ...state.prevInput };
-  let cursorTime = now;
-  if (state.pendingInputs.length > 0) {
-    replayPrev = { ...state.pendingInputs[0].input };
-    cursorTime = state.pendingInputs[0].sentAt;
-  }
-
-  for (let i = 0; i < state.pendingInputs.length; i++) {
-    const current = state.pendingInputs[i];
-    const nextTime = i + 1 < state.pendingInputs.length ? state.pendingInputs[i + 1].sentAt : now;
-    const dtMs = Math.max(0, nextTime - current.sentAt);
-    applyPredictedStep(baseLocal, baseTimers, current.input, replayPrev, dtMs, current.sentAt);
-    replayPrev = current.input;
-    cursorTime = nextTime;
-  }
-
   if (!state.predictedLocal) {
-    state.predictedLocal = baseLocal;
+    state.predictedLocal = { x: auth.x, y: auth.y };
   } else {
-    const dx = baseLocal.x - state.predictedLocal.x;
-    const dy = baseLocal.y - state.predictedLocal.y;
+    const dx = auth.x - state.predictedLocal.x;
+    const dy = auth.y - state.predictedLocal.y;
     const dist = Math.hypot(dx, dy);
-    if (dist > 95) {
-      state.predictedLocal = baseLocal;
-    } else if (dist > 1.5) {
-      state.predictedLocal.x += dx * 0.35;
-      state.predictedLocal.y += dy * 0.35;
+
+    if (dist > 140) {
+      state.predictedLocal.x = auth.x;
+      state.predictedLocal.y = auth.y;
+    } else if (dist > 48) {
+      state.predictedLocal.x += dx * 0.12;
+      state.predictedLocal.y += dy * 0.12;
+    } else if (dist > 10) {
+      state.predictedLocal.x += dx * 0.04;
+      state.predictedLocal.y += dy * 0.04;
     }
   }
-  state.predictedTimers = baseTimers;
+
+  state.predictedTimers.dashCooldownUntil = now + (auth.dashCooldownRemainMs || 0);
+  if (auth.dashing && state.predictedTimers.dashUntil < now + 50) {
+    state.predictedTimers.dashUntil = now + 140;
+  } else if (!auth.dashing && state.predictedTimers.dashUntil < now) {
+    state.predictedTimers.dashUntil = 0;
+  }
 }
 
 function getBounds(side) {
@@ -226,6 +210,7 @@ function getBounds(side) {
 }
 function updatePredictedLocal(dtMs) {
   if (!state.serverState || !state.mySide) return;
+  if (!['countdown', 'playing'].includes(state.serverState.phase)) return;
   const auth = state.serverState.players[state.mySide];
   if (!state.predictedLocal) {
     state.predictedLocal = { x: auth.x, y: auth.y };
