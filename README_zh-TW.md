@@ -1,161 +1,58 @@
-# Wild Ball Duel Online 專案
+# Arcane Duel Online（回合制多人線上對戰）
 
-這是一個 **權威伺服器(authoritative server)** 的 2 人即時連線對戰專案。  
-房主固定在左側，挑戰者固定在右側；雙方都用同一套本機按鍵邏輯，但可以各自在自己的電腦上改鍵。
+這是一個更適合線上遊玩的**回合制雙人對戰**專案。  
+不需要即時同步移動與碰撞，因此比即時球類對戰更穩、更容易異地連線。
 
-## 這版新增
-- 雙方都準備後，自動切換成 **聚焦遊戲畫面**
-- ESC 暫停選單
-- 更乾淨的大廳 / 遊戲排版
-- Electron 桌面包裝骨架，可打成 Windows 可攜式 EXE
-
-## 建議 Node.js 版本
-- **Node.js 24 LTS**
-- 也可用 **Node.js 22 LTS**
+## 玩法
+- 左側為房主，右側為挑戰者
+- 雙方每回合同步選招
+- 動作：
+  - 普通攻擊：3 傷害
+  - 防禦：減少 2 傷害
+  - 蓄力：+1 能量
+  - 強襲：耗 2 能量，造成 6 傷害
+  - 治療：耗 1 能量，恢復 3 HP
 
 ## 本機啟動
 ```bash
 npm install
-npm run server
+npm start
 ```
 
-瀏覽器開：
+打開：
 ```text
 http://localhost:3000
 ```
 
-## 同機雙分頁測試
-1. 開兩個瀏覽器分頁
-2. 一邊建立房間
-3. 另一邊輸入房號加入
-4. 雙方都按「準備」
-5. 介面會自動切成聚焦遊戲畫面
-
-## 區網讓另一台電腦進來
-假設主機區網 IP 是 `192.168.1.23`
-
-另一台電腦開：
+## Railway 部署
+1. 把專案推到 GitHub
+2. 在 Railway 建立專案
+3. 選擇 **Deploy from GitHub repo**
+4. 部署完成後，到：
+   - Settings
+   - Networking
+   - Public Networking
+   - Generate Domain
+5. 取得公開網址，例如：
 ```text
-http://192.168.1.23:3000
+https://your-game.up.railway.app
 ```
 
-## 異地連線
-把伺服器部署到雲端，例如：
-- Railway
-- Render
-- VPS + PM2 + Nginx
+## 打包成 EXE
+先設定你要連線的伺服器網址：
 
-部署後雙方都打開：
-```text
-https://your-game.example.com
-```
-
-## Electron 桌面版
-
-### 本機測試
-先開伺服器：
-```bash
-npm run server
-```
-
-再開桌面版：
-```bash
-npm run desktop:dev
-```
-
-### 指向遠端伺服器
-Windows PowerShell：
+### PowerShell
 ```powershell
-$env:APP_SERVER_URL="https://your-game.example.com"
-npm run desktop:dev
-```
-
-### 打包 EXE
-```bash
-npm run desktop:pack
-```
-
-完成後會在：
-```text
-dist/
-```
-看到可攜式 EXE。
-
-## 給另一台電腦用 EXE 是否可行？
-可以，但 EXE 只是「桌面前端」。  
-真正連線還是要連到你的伺服器網址。
-
-所以最佳做法是：
-1. 先把伺服器部署到雲端
-2. 再用 `APP_SERVER_URL` 指到雲端網址打包 EXE
-3. 另一台電腦直接開 EXE，就能進建立 / 加入房間畫面
-
-## 專案結構
-```text
-netduel_project/
-  public/
-    index.html
-    style.css
-    client.js
-  src/
-    constants.js
-    gameRoom.js
-    roomManager.js
-  electron/
-    main.js
-    preload.js
-  server.js
-  package.json
-```
-
-
-## Electron 黑畫面排查
-
-如果打開 EXE 一片黑，最常見原因是桌面版沒有拿到正確的伺服器網址。
-這個專案已改成在 **打包時** 讀取 `APP_SERVER_URL` 並寫入 `electron/runtime-config.json`。
-
-打包前請先在 PowerShell 設定：
-
-```powershell
-$env:APP_SERVER_URL="https://你的Railway網址"
+$env:APP_SERVER_URL="https://你的遊戲網址"
 npm.cmd install
 npm.cmd run desktop:pack
 ```
 
-打包出的 EXE 會把這個網址內建進去。
-如果載入失敗，Electron 也會跳出錯誤視窗顯示目前嘗試連線的 URL。
+打包後輸出會在：
+```text
+dist/
+```
 
-
-## 本次低回朔修正
-- 本地角色以弱校正為主，不再頻繁硬貼伺服器座標。
-- 球維持伺服器權威，只做視覺插值。
-- 本機雙瀏覽器測試將插值延遲降到 25ms，以減少體感延遲。
-
-
-## v6 體感優化
-- 本地玩家改成更弱的伺服器校正，優先降低回朔感。
-- 球加入獨立 visualBall 平滑層，畫面更順。
-- renderDelayMs 調低到 18，較適合同機雙瀏覽器測試。
-
-
-## v7 同步策略
-- 自身角色：本地即時顯示優先，小中誤差不做視覺修正。
-- 球：伺服器權威，前端只做平滑追蹤。
-- 伺服器擊球容許：加大命中判定 padding，用誤差容忍吸收延遲。
-
-
-## 本版調整
-- 降低角色移動、衝刺、球速與強化球速，減少同步壓力。
-- 取消激進的本地球預演，改成更保守的伺服器球平滑顯示，避免順移感。
-
-
-## 本版重點
-- predictedBall / authoritativeBall / renderBall 思路
-- 本地擊球先成立，再平滑融合伺服器結果
-- 球互動更接近成熟線上遊戲常見做法
-
-
-## 本版重點
-- 修正本地角色預測速度與伺服器速度不一致問題
-- 本地角色改成固定步長模擬，減少移動抖動
-- 伺服器校正只有在非常大誤差時才慢慢顯示
+## 注意
+- 如果你是本機測試桌面版，`electron/runtime-config.json` 內建是 `http://localhost:3000`
+- 若要給朋友使用，請先部署到 Railway / Render，再用公開網址重新打包 EXE

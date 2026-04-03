@@ -3,108 +3,125 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Wild Ball Duel Online</title>
+  <title>Arcane Duel Online</title>
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
-  <div id="app" class="app-shell">
-    <div class="topbar" id="topbar">
+  <div class="app">
+    <header class="topbar">
       <div>
-        <div class="title">Wild Ball Duel Online</div>
-        <div class="subtitle" id="statusText">建立房間或加入房間，開始異地連線對戰</div>
+        <h1>Arcane Duel Online</h1>
+        <p>回合制多人線上對戰：秘密選招，同步結算，適合異地雙人對戰。</p>
       </div>
-      <div class="topbar-actions">
-        <button id="fullscreenBtn" class="ghost-btn">全螢幕</button>
-        <div class="badge" id="connectionBadge">未連線</div>
+      <div class="badge" id="connectionBadge">連線中</div>
+    </header>
+
+    <section class="card lobby-card" id="lobbyCard">
+      <div class="lobby-grid">
+        <div class="panel">
+          <h2>建立房間</h2>
+          <label>你的暱稱</label>
+          <input id="hostName" type="text" maxlength="16" placeholder="例如：房主" />
+          <button id="createRoomBtn" class="primary">建立房間</button>
+        </div>
+        <div class="panel">
+          <h2>加入房間</h2>
+          <label>你的暱稱</label>
+          <input id="guestName" type="text" maxlength="16" placeholder="例如：挑戰者" />
+          <label>房號</label>
+          <input id="roomCodeInput" type="text" maxlength="6" placeholder="輸入房號" />
+          <button id="joinRoomBtn" class="primary">加入房間</button>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <div class="layout" id="layout">
-      <aside class="sidebar" id="sidebar">
-        <section class="panel">
-          <h2>房間</h2>
-          <div class="button-col">
-            <button id="createRoomBtn">建立房間</button>
-            <div class="inline-row">
-              <input id="joinRoomInput" placeholder="輸入房號" maxlength="8" />
-              <button id="joinRoomBtn">加入</button>
-            </div>
-          </div>
-          <div class="meta-list">
-            <div>房號：<strong id="roomIdText">-</strong></div>
-            <div>你的座位：<strong id="mySideText">-</strong></div>
-            <div>房主固定在左側，挑戰者固定在右側</div>
-          </div>
-          <div class="button-col compact">
-            <button id="copyRoomBtn">複製房號</button>
-            <button id="readyBtn">準備</button>
-            <button id="restartBtn">重新開始</button>
-            <button id="leaveRoomBtn" class="danger">離開房間</button>
-          </div>
-        </section>
-
-        <section class="panel">
-          <h2>目前鍵位</h2>
-          <div id="keybindList" class="keybind-list"></div>
-          <div class="button-col compact">
-            <button id="openKeybindBtn">改鍵</button>
-            <button id="resetKeybindBtn">恢復預設</button>
-          </div>
-          <div class="hint">兩邊都使用同一套本機按鍵。你可以自行調整，設定會保存在瀏覽器或桌面版本機儲存。</div>
-        </section>
-
-        <section class="panel">
-          <h2>對戰說明</h2>
-          <div id="dynamicHelp" class="hint"></div>
-          <div class="hint">雙方都準備後，介面會自動切換成聚焦遊戲畫面。按 ESC 可叫出暫停選單。</div>
-        </section>
-      </aside>
-
-      <main class="game-area" id="gameArea">
-        <div class="hud" id="hud">
-          <div class="score-block side-left">
-            <div class="score-name">左側</div>
-            <div class="score-value" id="scoreLeft">0</div>
-            <div class="score-sub" id="leftReadyText">未加入</div>
-          </div>
-          <div class="center-block">
-            <div class="phase" id="phaseText">WAITING</div>
-            <div class="room-state" id="roomStateText">等待兩邊玩家進房</div>
-          </div>
-          <div class="score-block side-right">
-            <div class="score-name">右側</div>
-            <div class="score-value" id="scoreRight">0</div>
-            <div class="score-sub" id="rightReadyText">未加入</div>
+    <section class="card hidden" id="roomCard">
+      <div class="room-header">
+        <div>
+          <div class="tiny">房號</div>
+          <div class="room-code-row">
+            <span id="roomCode" class="room-code">------</span>
+            <button id="copyCodeBtn" class="secondary">複製房號</button>
           </div>
         </div>
-        <div class="focus-tip" id="focusTip">雙方準備完成後，這裡會切換成純遊戲視圖</div>
-        <canvas id="gameCanvas" width="1280" height="720"></canvas>
-      </main>
-    </div>
-  </div>
-
-  <div id="keybindModal" class="modal hidden">
-    <div class="modal-card">
-      <h2>按鍵設定</h2>
-      <p>點選要修改的操作，再按下新按鍵。ESC 保留給系統。若有重複按鍵，會自動對調。</p>
-      <div id="keybindEditor" class="keybind-editor"></div>
-      <div class="button-col compact">
-        <button id="closeKeybindBtn">關閉</button>
+        <div class="state-pill" id="phasePill">大廳中</div>
       </div>
-    </div>
-  </div>
 
-  <div id="pauseModal" class="modal hidden">
-    <div class="modal-card pause-card">
-      <h2>暫停選單</h2>
-      <p>你可以繼續、重新開始、回到大廳或打開按鍵設定。</p>
-      <div class="button-col compact">
-        <button id="resumeBtn">繼續遊戲</button>
-        <button id="pauseRestartBtn">重新開始</button>
-        <button id="pauseKeybindBtn">按鍵設定</button>
-        <button id="pauseLeaveBtn" class="danger">回到大廳</button>
+      <div class="arena">
+        <div class="fighter left">
+          <div class="avatar">🐶</div>
+          <div class="name" id="leftName">房主</div>
+          <div class="bars">
+            <div class="stat">HP <span id="leftHp">24</span>/24</div>
+            <div class="bar"><div id="leftHpBar" class="fill hp"></div></div>
+            <div class="stat">能量 <span id="leftEnergy">0</span>/5</div>
+            <div class="bar"><div id="leftEnergyBar" class="fill energy"></div></div>
+          </div>
+          <div class="subinfo" id="leftStatus">等待準備</div>
+        </div>
+
+        <div class="center-board">
+          <div class="turn-box">
+            <div class="tiny">回合</div>
+            <div class="turn-number" id="turnNumber">0</div>
+          </div>
+          <div class="vs">VS</div>
+          <div class="you-box" id="youBox">尚未加入房間</div>
+        </div>
+
+        <div class="fighter right">
+          <div class="avatar">🐱</div>
+          <div class="name" id="rightName">挑戰者</div>
+          <div class="bars">
+            <div class="stat">HP <span id="rightHp">24</span>/24</div>
+            <div class="bar"><div id="rightHpBar" class="fill hp"></div></div>
+            <div class="stat">能量 <span id="rightEnergy">0</span>/5</div>
+            <div class="bar"><div id="rightEnergyBar" class="fill energy"></div></div>
+          </div>
+          <div class="subinfo" id="rightStatus">等待加入</div>
+        </div>
       </div>
-    </div>
+
+      <div class="actions-wrap" id="actionsWrap">
+        <h3>選擇本回合動作</h3>
+        <div class="action-grid">
+          <button class="action-btn" data-action="attack"><span>普通攻擊</span><small>造成 3 傷害</small></button>
+          <button class="action-btn" data-action="guard"><span>防禦</span><small>減少 2 傷害</small></button>
+          <button class="action-btn" data-action="charge"><span>蓄力</span><small>獲得 1 能量</small></button>
+          <button class="action-btn" data-action="special"><span>強襲</span><small>耗 2 能量，造成 6 傷害</small></button>
+          <button class="action-btn" data-action="heal"><span>治療</span><small>耗 1 能量，恢復 3 HP</small></button>
+        </div>
+        <div class="action-row">
+          <button id="submitActionBtn" class="primary">鎖定本回合動作</button>
+          <div id="selectedActionText" class="selected-text">尚未選擇</div>
+        </div>
+      </div>
+
+      <div class="control-row">
+        <button id="readyBtn" class="primary">準備</button>
+        <button id="rematchBtn" class="secondary">再來一局</button>
+      </div>
+
+      <div class="bottom-grid">
+        <div class="panel">
+          <h3>規則</h3>
+          <ul class="rules">
+            <li>雙方都選好動作後，才會同步結算。</li>
+            <li>普通攻擊：造成 3 傷害。</li>
+            <li>防禦：減少本回合受到的 2 傷害。</li>
+            <li>蓄力：獲得 1 點能量。</li>
+            <li>強襲：消耗 2 點能量，造成 6 傷害。</li>
+            <li>治療：消耗 1 點能量，恢復 3 HP。</li>
+          </ul>
+        </div>
+        <div class="panel log-panel">
+          <h3>戰鬥紀錄</h3>
+          <div id="logList" class="log-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <div id="toastContainer" class="toast-container"></div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>

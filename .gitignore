@@ -1,13 +1,8 @@
 node_modules/
 dist/
-out/
 build/
-*.log
 .env
 .env.*
+npm-debug.log*
 .DS_Store
 Thumbs.db
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*

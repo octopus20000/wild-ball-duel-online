@@ -1,72 +1,59 @@
-const { app, BrowserWindow, dialog } = require('electron');
-const path = require('path');
-const fs = require('fs');
+const { app, BrowserWindow, dialog } = require("electron");
+const path = require("path");
+const fs = require("fs");
 
-function resolveStartUrl() {
+function resolveServerUrl() {
   const envUrl = process.env.APP_SERVER_URL;
   if (envUrl) return envUrl;
-
-  const runtimeConfigPath = path.join(__dirname, 'runtime-config.json');
   try {
-    if (fs.existsSync(runtimeConfigPath)) {
-      const raw = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
-      if (raw && typeof raw.serverUrl === 'string' && raw.serverUrl) {
-        return raw.serverUrl;
-      }
+    const cfgPath = path.join(__dirname, "runtime-config.json");
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+      if (cfg.serverUrl) return cfg.serverUrl;
     }
-  } catch (err) {
-    console.error('Failed reading runtime config:', err);
-  }
-
-  return 'http://localhost:3000';
+  } catch {}
+  return "http://localhost:3000";
 }
 
-const startUrl = resolveStartUrl();
-
 function createWindow() {
+  const targetUrl = resolveServerUrl();
+
   const win = new BrowserWindow({
-    width: 1400,
-    height: 920,
+    width: 1360,
+    height: 900,
     minWidth: 1100,
     minHeight: 760,
-    backgroundColor: '#0b1324',
-    autoHideMenuBar: true,
-    title: 'Wild Ball Duel Online',
     show: false,
+    backgroundColor: "#0b1120",
+    title: "Arcane Duel Online",
     webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      preload: path.join(__dirname, 'preload.js')
+      nodeIntegration: false
     }
   });
 
-  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
-    if (!isMainFrame) return;
-    const msg = `載入失敗
-
-URL: ${validatedURL}
-錯誤代碼: ${errorCode}
-錯誤訊息: ${errorDescription}
-
-目前設定的伺服器網址:
-${startUrl}
-
-如果你是打包 EXE，請確認打包時有設定 APP_SERVER_URL。`;
-    dialog.showErrorBox('Wild Ball Duel Online 載入失敗', msg);
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    dialog.showErrorBox(
+      "載入失敗",
+      `無法開啟遊戲頁面。\n\n網址：${validatedURL || targetUrl}\n錯誤：${errorDescription} (${errorCode})`
+    );
   });
 
-  win.webContents.on('did-finish-load', () => {
+  win.webContents.on("did-finish-load", () => {
     win.show();
   });
 
-  win.loadURL(startUrl);
+  win.loadURL(targetUrl);
 }
 
 app.whenReady().then(() => {
   createWindow();
-  app.on('activate', () => {
+  app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
 });
