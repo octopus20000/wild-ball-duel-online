@@ -1,0 +1,41 @@
+{
+  "name": "wild-ball-duel-online",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Authoritative-server online duel game with Socket.IO and Electron wrapper",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "node server.js",
+    "server": "node server.js",
+    "dev": "node --watch server.js",
+    "desktop:dev": "node scripts/write-runtime-config.js && electron .",
+    "desktop:pack": "node scripts/write-runtime-config.js && electron-builder --win portable"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "nanoid": "^5.1.5"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.oai.wildballduelonline",
+    "productName": "Wild Ball Duel Online",
+    "files": [
+      "public/**/*",
+      "src/**/*",
+      "server.js",
+      "electron/**/*",
+      "package.json",
+      "scripts/**/*",
+      "electron/runtime-config.json"
+    ],
+    "win": {
+      "target": [
+        "portable"
+      ]
+    }
+  }
+}

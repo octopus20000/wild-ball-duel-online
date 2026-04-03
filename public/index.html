@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Wild Ball Duel Online</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <div class="topbar" id="topbar">
+      <div>
+        <div class="title">Wild Ball Duel Online</div>
+        <div class="subtitle" id="statusText">建立房間或加入房間，開始異地連線對戰</div>
+      </div>
+      <div class="topbar-actions">
+        <button id="fullscreenBtn" class="ghost-btn">全螢幕</button>
+        <div class="badge" id="connectionBadge">未連線</div>
+      </div>
+    </div>
+
+    <div class="layout" id="layout">
+      <aside class="sidebar" id="sidebar">
+        <section class="panel">
+          <h2>房間</h2>
+          <div class="button-col">
+            <button id="createRoomBtn">建立房間</button>
+            <div class="inline-row">
+              <input id="joinRoomInput" placeholder="輸入房號" maxlength="8" />
+              <button id="joinRoomBtn">加入</button>
+            </div>
+          </div>
+          <div class="meta-list">
+            <div>房號：<strong id="roomIdText">-</strong></div>
+            <div>你的座位：<strong id="mySideText">-</strong></div>
+            <div>房主固定在左側，挑戰者固定在右側</div>
+          </div>
+          <div class="button-col compact">
+            <button id="copyRoomBtn">複製房號</button>
+            <button id="readyBtn">準備</button>
+            <button id="restartBtn">重新開始</button>
+            <button id="leaveRoomBtn" class="danger">離開房間</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>目前鍵位</h2>
+          <div id="keybindList" class="keybind-list"></div>
+          <div class="button-col compact">
+            <button id="openKeybindBtn">改鍵</button>
+            <button id="resetKeybindBtn">恢復預設</button>
+          </div>
+          <div class="hint">兩邊都使用同一套本機按鍵。你可以自行調整，設定會保存在瀏覽器或桌面版本機儲存。</div>
+        </section>
+
+        <section class="panel">
+          <h2>對戰說明</h2>
+          <div id="dynamicHelp" class="hint"></div>
+          <div class="hint">雙方都準備後，介面會自動切換成聚焦遊戲畫面。按 ESC 可叫出暫停選單。</div>
+        </section>
+      </aside>
+
+      <main class="game-area" id="gameArea">
+        <div class="hud" id="hud">
+          <div class="score-block side-left">
+            <div class="score-name">左側</div>
+            <div class="score-value" id="scoreLeft">0</div>
+            <div class="score-sub" id="leftReadyText">未加入</div>
+          </div>
+          <div class="center-block">
+            <div class="phase" id="phaseText">WAITING</div>
+            <div class="room-state" id="roomStateText">等待兩邊玩家進房</div>
+          </div>
+          <div class="score-block side-right">
+            <div class="score-name">右側</div>
+            <div class="score-value" id="scoreRight">0</div>
+            <div class="score-sub" id="rightReadyText">未加入</div>
+          </div>
+        </div>
+        <div class="focus-tip" id="focusTip">雙方準備完成後，這裡會切換成純遊戲視圖</div>
+        <canvas id="gameCanvas" width="1280" height="720"></canvas>
+      </main>
+    </div>
+  </div>
+
+  <div id="keybindModal" class="modal hidden">
+    <div class="modal-card">
+      <h2>按鍵設定</h2>
+      <p>點選要修改的操作，再按下新按鍵。ESC 保留給系統。若有重複按鍵，會自動對調。</p>
+      <div id="keybindEditor" class="keybind-editor"></div>
+      <div class="button-col compact">
+        <button id="closeKeybindBtn">關閉</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="pauseModal" class="modal hidden">
+    <div class="modal-card pause-card">
+      <h2>暫停選單</h2>
+      <p>你可以繼續、重新開始、回到大廳或打開按鍵設定。</p>
+      <div class="button-col compact">
+        <button id="resumeBtn">繼續遊戲</button>
+        <button id="pauseRestartBtn">重新開始</button>
+        <button id="pauseKeybindBtn">按鍵設定</button>
+        <button id="pauseLeaveBtn" class="danger">回到大廳</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/client.js"></script>
+</body>
+</html>
