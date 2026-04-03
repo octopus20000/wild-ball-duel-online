@@ -10,7 +10,7 @@ const state = {
   rebinding: null, pauseOpen: false, keybinds: loadKeybinds(),
   input: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false },
   snapshots: [],
-  renderDelayMs: 18,
+  renderDelayMs: 8,
   lastFrameAt: performance.now(),
   predictedLocal: null,
   predictedTimers: { dashUntil: 0, dashCooldownUntil: 0 },
@@ -184,17 +184,16 @@ function reconcileLocalFromServer(payload) {
     const dy = auth.y - state.predictedLocal.y;
     const dist = Math.hypot(dx, dy);
 
-    // Visual smoothness first: ignore tiny mismatches, softly trim medium drift,
-    // and only hard-correct when we are clearly desynced.
-    if (dist > 180) {
-      state.predictedLocal.x = auth.x;
-      state.predictedLocal.y = auth.y;
-    } else if (dist > 96) {
-      state.predictedLocal.x += dx * 0.08;
-      state.predictedLocal.y += dy * 0.08;
-    } else if (dist > 48) {
-      state.predictedLocal.x += dx * 0.025;
-      state.predictedLocal.y += dy * 0.025;
+    // Local feel first:
+    // - tiny / medium mismatch: do not visually correct at all
+    // - large mismatch: only bias future motion very slightly
+    // - extreme mismatch: do a soft catch-up instead of visible snapping
+    if (dist > 260) {
+      state.predictedLocal.x += dx * 0.22;
+      state.predictedLocal.y += dy * 0.22;
+    } else if (dist > 140) {
+      state.predictedLocal.x += dx * 0.045;
+      state.predictedLocal.y += dy * 0.045;
     }
   }
 
@@ -259,8 +258,8 @@ function getRenderState() {
       state.visualBall.x = out.ball.x;
       state.visualBall.y = out.ball.y;
     } else {
-      state.visualBall.x += dx * 0.34;
-      state.visualBall.y += dy * 0.34;
+      state.visualBall.x += dx * 0.22;
+      state.visualBall.y += dy * 0.22;
     }
     state.visualBall.vx = out.ball.vx;
     state.visualBall.vy = out.ball.vy;
@@ -456,5 +455,5 @@ window.addEventListener('blur', () => {
 updateConnection();
 updateKeybindUI();
 updateReadyTexts();
-setStatus('建立房間或加入房間。此版本已優先降低本地操作回朔感。');
+setStatus('建立房間或加入房間。此版本已改成自身角色視覺即時優先，伺服器修正不直接呈現在畫面。');
 (function loop(now){ const dt = now - state.lastFrameAt; state.lastFrameAt = now; updatePredictedLocal(dt); render(); requestAnimationFrame(loop); })(performance.now());

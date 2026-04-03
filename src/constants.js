@@ -6,7 +6,7 @@ const FIELD = {
 
 const CONFIG = {
   fps: 90,
-  broadcastHz: 45,
+  broadcastHz: 40,
   roundDelayMs: 1200,
   winningScore: 7,
   playerSize: 84,
@@ -29,9 +29,9 @@ const CONFIG = {
   friction: 0.9992,
   wallBounce: 0.995,
   maxBallSpeed: 1550,
-  touchPaddingIdle: 10,
-  touchPaddingHit: 20,
-  touchPaddingSpecial: 8,
+  touchPaddingIdle: 12,
+  touchPaddingHit: 30,
+  touchPaddingSpecial: 14,
   topBoostZoneY: 150,
   topBoostPadding: 16,
   minXPadding: 14,
