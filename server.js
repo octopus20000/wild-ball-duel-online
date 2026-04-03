@@ -22,7 +22,7 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-function randomCode() {
+function roomCode() {
   let code = "";
   do {
     code = crypto.randomBytes(3).toString("hex").toUpperCase();
@@ -30,11 +30,11 @@ function randomCode() {
   return code;
 }
 
-function defaultDeck() {
+function makeDeck() {
   return [
-    { id: "mirror-wall", name: "鏡牆", desc: "本回合防守成功時可完全反射普通球。" },
-    { id: "double-drive", name: "雙重抽射", desc: "普通射門傷害 +1。" },
-    { id: "focus-charge", name: "專注蓄力", desc: "蓄力時額外 +1 能量。" }
+    { id: "mirror-wall", name: "鏡牆", desc: "封堵成功時可把普通抽射直接反射回去。", rarity: "epic" },
+    { id: "double-drive", name: "雙重抽射", desc: "抽射傷害 +1。", rarity: "rare" },
+    { id: "focus-charge", name: "專注蓄力", desc: "蓄力時額外 +1 能量。", rarity: "common" }
   ];
 }
 
@@ -50,13 +50,14 @@ function createPlayer(name, side) {
     choice: null,
     connected: true,
     rematchVote: false,
-    deck: defaultDeck(),
-    activeCard: null
+    deck: makeDeck(),
+    activeCard: null,
+    lastAction: null
   };
 }
 
 function createRoom(socket, name) {
-  const code = randomCode();
+  const code = roomCode();
   const room = {
     code,
     phase: "lobby",
@@ -65,6 +66,7 @@ function createRoom(socket, name) {
     guestId: null,
     winner: null,
     ballLane: "mid",
+    reveal: null,
     log: [{
       turn: 0,
       title: "房間建立",
@@ -97,6 +99,29 @@ function otherSide(side) {
   return side === "left" ? "right" : "left";
 }
 
+function laneLabel(lane) {
+  return { up: "上路", mid: "中路", down: "下路" }[lane] || lane;
+}
+
+function actionLabel(action) {
+  return {
+    drive: "抽射",
+    power: "爆射",
+    curve: "曲球",
+    guard: "封堵",
+    charge: "蓄力"
+  }[action] || action;
+}
+
+function pushLog(room, title, detail) {
+  room.log.push({ turn: room.turn, title, detail });
+  room.log = room.log.slice(-20);
+}
+
+function hasCard(player, id) {
+  return player.activeCard?.id === id;
+}
+
 function summarize(room, viewerId) {
   const you = getSide(room, viewerId);
 
@@ -113,7 +138,10 @@ function summarize(room, viewerId) {
       connected: player.connected,
       rematchVote: player.rematchVote,
       activeCard: player.activeCard,
-      deck: isSelf ? player.deck : player.deck.map((c) => ({ id: c.id, name: "未知戰術卡", desc: "對手持有的卡牌。" }))
+      lastAction: player.lastAction,
+      deck: isSelf
+        ? player.deck
+        : player.deck.map((c) => ({ id: c.id, name: "未知戰術卡", desc: "對手手中的卡牌。", rarity: c.rarity }))
     };
   }
 
@@ -124,13 +152,14 @@ function summarize(room, viewerId) {
     winner: room.winner,
     you,
     ballLane: room.ballLane,
+    reveal: room.reveal,
     lanes: LANES,
     actions: ACTIONS,
     players: {
       left: pack(room.players.left, "left"),
       right: pack(room.players.right, "right")
     },
-    log: room.log.slice(-18)
+    log: room.log
   };
 }
 
@@ -139,51 +168,89 @@ function emitRoom(room) {
   if (room.guestId) io.to(room.guestId).emit("room:update", summarize(room, room.guestId));
 }
 
-function pushLog(room, title, detail) {
-  room.log.push({ turn: room.turn, title, detail });
-  room.log = room.log.slice(-18);
-}
-
 function resetBattle(room) {
   room.phase = "playing";
   room.turn = 1;
   room.winner = null;
   room.ballLane = "mid";
-  room.log = [{ turn: 0, title: "對局開始", detail: "雙方都已就緒，球目前位於中路。" }];
+  room.reveal = null;
+  room.log = [{
+    turn: 0,
+    title: "開戰",
+    detail: "雙方就位，球從中路發動。"
+  }];
   for (const side of ["left", "right"]) {
     const p = room.players[side];
     p.hp = MAX_HP;
     p.energy = 1;
     p.score = 0;
+    p.ready = true;
     p.submitted = false;
     p.choice = null;
     p.rematchVote = false;
     p.activeCard = null;
+    p.lastAction = null;
     p.connected = true;
-    p.deck = defaultDeck();
+    p.deck = makeDeck();
   }
 }
 
-function actionLabel(a) {
-  return {
-    drive: "抽射",
-    power: "爆射",
-    curve: "曲球",
-    guard: "封堵",
-    charge: "蓄力"
-  }[a] || a;
-}
+function resolveShot(attacker, defender, aChoice, dChoice, currentLane) {
+  let lane = aChoice.lane;
+  let power = 1;
+  let damage = 1;
+  let text = "抽射";
 
-function laneLabel(l) {
-  return {
-    up: "上路",
-    mid: "中路",
-    down: "下路"
-  }[l] || l;
-}
+  if (aChoice.action === "drive") {
+    damage = 1 + (hasCard(attacker, "double-drive") ? 1 : 0);
+    text = "抽射";
+  } else if (aChoice.action === "power") {
+    if (attacker.energy < 2) return { detail: `${attacker.name} 爆射失敗，能量不足。`, success: false, nextLane: currentLane };
+    attacker.energy -= 2;
+    damage = 2;
+    text = "爆射";
+  } else if (aChoice.action === "curve") {
+    if (attacker.energy < 1) return { detail: `${attacker.name} 曲球失敗，能量不足。`, success: false, nextLane: currentLane };
+    attacker.energy -= 1;
+    damage = 1;
+    lane = aChoice.targetLane || aChoice.lane;
+    text = "曲球";
+  } else {
+    return { detail: `${attacker.name} 沒有形成有效射門。`, success: false, nextLane: currentLane };
+  }
 
-function hasCard(player, cardId) {
-  return player.activeCard?.id === cardId;
+  const defenderBlocking = dChoice.action === "guard" && dChoice.lane === lane;
+  if (defenderBlocking) {
+    if (hasCard(defender, "mirror-wall") && aChoice.action === "drive") {
+      return {
+        detail: `${defender.name} 用【鏡牆】把 ${attacker.name} 的抽射反射了回去！`,
+        success: false,
+        reflected: true,
+        nextLane: lane,
+        reflectedBy: defender.side
+      };
+    }
+    if (damage <= 1) {
+      return {
+        detail: `${defender.name} 在${laneLabel(lane)}完成封堵，成功擋下 ${attacker.name} 的${text}。`,
+        success: false,
+        nextLane: lane
+      };
+    }
+    defender.hp = clamp(defender.hp - 1, 0, MAX_HP);
+    return {
+      detail: `${attacker.name} 的${text}突破封堵！${defender.name} 額外失去 1 點生命。`,
+      success: true,
+      nextLane: lane
+    };
+  }
+
+  defender.hp = clamp(defender.hp - damage, 0, MAX_HP);
+  return {
+    detail: `${attacker.name} 從${laneLabel(aChoice.lane)}發動${text}，命中成功！`,
+    success: true,
+    nextLane: lane
+  };
 }
 
 function resolveTurn(room) {
@@ -192,141 +259,89 @@ function resolveTurn(room) {
   const L = left.choice;
   const R = right.choice;
 
+  left.lastAction = L;
+  right.lastAction = R;
+
   const leftOnBall = L.lane === room.ballLane;
   const rightOnBall = R.lane === room.ballLane;
 
   let nextBallLane = room.ballLane;
-  let scoreEvent = null;
-  let detailParts = [];
+  let logParts = [];
 
-  // passive: charge
   if (L.action === "charge") {
     left.energy = clamp(left.energy + 1 + (hasCard(left, "focus-charge") ? 1 : 0), 0, MAX_ENERGY);
-    detailParts.push(`${left.name} 蓄力成功。`);
+    logParts.push(`${left.name} 完成蓄力。`);
   }
   if (R.action === "charge") {
     right.energy = clamp(right.energy + 1 + (hasCard(right, "focus-charge") ? 1 : 0), 0, MAX_ENERGY);
-    detailParts.push(`${right.name} 蓄力成功。`);
+    logParts.push(`${right.name} 完成蓄力。`);
   }
 
-  function attemptShot(attacker, defender, A, D, attackerSide) {
-    let power = 1;
-    let text = "";
-    let scored = false;
-    let lane = A.lane;
+  room.reveal = {
+    turn: room.turn,
+    left: { lane: L.lane, action: L.action, card: left.activeCard?.name || null },
+    right: { lane: R.lane, action: R.action, card: right.activeCard?.name || null },
+    ballLaneBefore: room.ballLane,
+    ballLaneAfter: room.ballLane,
+    resultText: ""
+  };
 
-    if (A.action === "drive") {
-      power = 1 + (hasCard(attacker, "double-drive") ? 1 : 0);
-      text = "抽射";
-    } else if (A.action === "power" && attacker.energy >= 2) {
-      attacker.energy -= 2;
-      power = 2;
-      text = "爆射";
-    } else if (A.action === "curve" && attacker.energy >= 1) {
-      attacker.energy -= 1;
-      power = 1;
-      text = "曲球";
-      lane = A.targetLane || lane;
-    } else {
-      return { detail: `${attacker.name} 想出招但能量不足。`, scored: false, nextLane: room.ballLane };
-    }
-
-    const defenderGuarding = D.action === "guard" && D.lane === lane;
-    if (defenderGuarding) {
-      if (hasCard(defender, "mirror-wall") && A.action === "drive") {
-        return {
-          detail: `${defender.name} 用鏡牆完美反射了 ${attacker.name} 的抽射！`,
-          scored: false,
-          reflected: true,
-          nextLane: lane
-        };
-      }
-      if (power <= 1) {
-        return {
-          detail: `${defender.name} 成功封堵了 ${attacker.name} 的${text}。`,
-          scored: false,
-          nextLane: lane
-        };
-      }
-      defender.hp = clamp(defender.hp - 1, 0, MAX_HP);
-      return {
-        detail: `${attacker.name} 的${text}突破封堵！${defender.name} 額外失去 1 點生命。`,
-        scored: true,
-        nextLane: lane
-      };
-    }
-
-    return {
-      detail: `${attacker.name} 從${laneLabel(A.lane)}發動${text}，成功得分！`,
-      scored: true,
-      nextLane: lane
-    };
-  }
-
-  // both contest the ball
   if (leftOnBall && rightOnBall) {
-    const lWeight = (L.action === "power" ? 3 : L.action === "drive" ? 2 : L.action === "curve" ? 2 : L.action === "guard" ? 2 : 1) + left.energy * 0.1;
-    const rWeight = (R.action === "power" ? 3 : R.action === "drive" ? 2 : R.action === "curve" ? 2 : R.action === "guard" ? 2 : 1) + right.energy * 0.1;
+    const lWeight = (L.action === "power" ? 3 : L.action === "curve" ? 2.4 : L.action === "drive" ? 2 : L.action === "guard" ? 1.8 : 1) + left.energy * 0.06;
+    const rWeight = (R.action === "power" ? 3 : R.action === "curve" ? 2.4 : R.action === "drive" ? 2 : R.action === "guard" ? 1.8 : 1) + right.energy * 0.06;
 
     if (Math.abs(lWeight - rWeight) < 0.35) {
-      detailParts.push("雙方在球路交會處僵持，球仍停留在原路線。");
+      logParts.push("雙方在中場形成僵持，球留在原路線。");
+      room.reveal.resultText = "勢均力敵，球仍停留在原路線。";
     } else if (lWeight > rWeight) {
-      const result = attemptShot(left, right, L, R, "left");
-      detailParts.push(result.detail);
-      if (result.reflected) {
-        nextBallLane = result.nextLane;
-      } else if (result.scored) {
+      const result = resolveShot(left, right, L, R, room.ballLane);
+      logParts.push(result.detail);
+      nextBallLane = result.nextLane;
+      if (result.success) {
         left.score += 1;
-        right.hp = clamp(right.hp - 1, 0, MAX_HP);
-        scoreEvent = "left";
-        nextBallLane = result.nextLane;
+        room.reveal.resultText = `${left.name} 取得 1 分！`;
+      } else if (result.reflected) {
+        room.reveal.resultText = `${right.name} 完成反射，球回到 ${laneLabel(result.nextLane)}。`;
+      } else {
+        room.reveal.resultText = `${right.name} 成功防下這球。`;
       }
     } else {
-      const result = attemptShot(right, left, R, L, "right");
-      detailParts.push(result.detail);
-      if (result.reflected) {
-        nextBallLane = result.nextLane;
-      } else if (result.scored) {
+      const result = resolveShot(right, left, R, L, room.ballLane);
+      logParts.push(result.detail);
+      nextBallLane = result.nextLane;
+      if (result.success) {
         right.score += 1;
-        left.hp = clamp(left.hp - 1, 0, MAX_HP);
-        scoreEvent = "right";
-        nextBallLane = result.nextLane;
+        room.reveal.resultText = `${right.name} 取得 1 分！`;
+      } else if (result.reflected) {
+        room.reveal.resultText = `${left.name} 完成反射，球回到 ${laneLabel(result.nextLane)}。`;
+      } else {
+        room.reveal.resultText = `${left.name} 成功防下這球。`;
       }
     }
   } else if (leftOnBall) {
-    const result = attemptShot(left, right, L, R, "left");
-    detailParts.push(result.detail);
-    if (result.reflected) {
-      nextBallLane = result.nextLane;
-    } else if (result.scored) {
-      left.score += 1;
-      right.hp = clamp(right.hp - 1, 0, MAX_HP);
-      scoreEvent = "left";
-      nextBallLane = result.nextLane;
-    }
+    const result = resolveShot(left, right, L, R, room.ballLane);
+    logParts.push(result.detail);
+    nextBallLane = result.nextLane;
+    room.reveal.resultText = result.success ? `${left.name} 取得 1 分！` : result.reflected ? `${right.name} 反射成功。` : `${right.name} 擋下這球。`;
+    if (result.success) left.score += 1;
   } else if (rightOnBall) {
-    const result = attemptShot(right, left, R, L, "right");
-    detailParts.push(result.detail);
-    if (result.reflected) {
-      nextBallLane = result.nextLane;
-    } else if (result.scored) {
-      right.score += 1;
-      left.hp = clamp(left.hp - 1, 0, MAX_HP);
-      scoreEvent = "right";
-      nextBallLane = result.nextLane;
-    }
+    const result = resolveShot(right, left, R, L, room.ballLane);
+    logParts.push(result.detail);
+    nextBallLane = result.nextLane;
+    room.reveal.resultText = result.success ? `${right.name} 取得 1 分！` : result.reflected ? `${left.name} 反射成功。` : `${left.name} 擋下這球。`;
+    if (result.success) right.score += 1;
   } else {
-    detailParts.push("雙方都沒有接到球，球沿原路線漂移。");
+    logParts.push("雙方都沒抓到球點，球沿原路線滾動。");
+    room.reveal.resultText = "雙方都沒有碰到球，球仍在原路線。";
   }
 
   room.ballLane = nextBallLane;
+  room.reveal.ballLaneAfter = nextBallLane;
 
   pushLog(
     room,
     `第 ${room.turn} 回合`,
-    `${left.name}：${laneLabel(L.lane)} + ${actionLabel(L.action)}；` +
-    `${right.name}：${laneLabel(R.lane)} + ${actionLabel(R.action)}。 ` +
-    detailParts.join(" ")
+    `${left.name}：${laneLabel(L.lane)} + ${actionLabel(L.action)}；${right.name}：${laneLabel(R.lane)} + ${actionLabel(R.action)}。 ${logParts.join(" ")}`
   );
 
   left.submitted = false;
@@ -406,8 +421,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    const chosenCard = player.deck.find((c) => c.id === cardId) || null;
-    player.activeCard = chosenCard;
+    player.activeCard = player.deck.find((c) => c.id === cardId) || null;
     player.choice = {
       lane,
       action,
@@ -427,7 +441,7 @@ io.on("connection", (socket) => {
     if (!room || room.phase !== "ended") return;
     const side = getSide(room, socket.id);
     room.players[side].rematchVote = true;
-    pushLog(room, "再戰投票", `${room.players[side].name} 希望再來一局。`);
+    pushLog(room, "再戰投票", `${room.players[side].name} 想再來一局。`);
     if (room.players.left.rematchVote && room.players.right.rematchVote) {
       room.players.left.ready = true;
       room.players.right.ready = true;
@@ -463,5 +477,5 @@ io.on("connection", (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Wild Ball Tactics Online server running on port ${PORT}`);
+  console.log(`Wild Ball Tactics Online visual server running on port ${PORT}`);
 });

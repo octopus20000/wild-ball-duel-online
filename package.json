@@ -1,7 +1,7 @@
 {
-  "name": "wild-ball-tactics-online",
-  "version": "1.0.0",
-  "description": "回合制戰術球鬥多人線上遊戲",
+  "name": "wild-ball-tactics-online-visual",
+  "version": "2.0.0",
+  "description": "圖像化回合制戰術球鬥多人線上遊戲",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

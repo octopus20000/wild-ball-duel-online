@@ -18,10 +18,10 @@ function resolveServerUrl() {
 function createWindow() {
   const targetUrl = resolveServerUrl();
   const win = new BrowserWindow({
-    width: 1420,
-    height: 940,
-    minWidth: 1160,
-    minHeight: 760,
+    width: 1440,
+    height: 960,
+    minWidth: 1180,
+    minHeight: 780,
     show: false,
     backgroundColor: "#08101d",
     title: "Wild Ball Tactics Online",
@@ -39,10 +39,7 @@ function createWindow() {
     );
   });
 
-  win.webContents.on("did-finish-load", () => {
-    win.show();
-  });
-
+  win.webContents.on("did-finish-load", () => win.show());
   win.loadURL(targetUrl);
 }
 
