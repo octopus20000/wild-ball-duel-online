@@ -10,10 +10,11 @@ const state = {
   rebinding: null, pauseOpen: false, keybinds: loadKeybinds(),
   input: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false },
   snapshots: [],
-  renderDelayMs: 25,
+  renderDelayMs: 18,
   lastFrameAt: performance.now(),
   predictedLocal: null,
   predictedTimers: { dashUntil: 0, dashCooldownUntil: 0 },
+  visualBall: null,
   prevInput: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false },
   inputSeq: 0,
   lastAckSeq: 0,
@@ -141,6 +142,7 @@ function resetNetSmoothing() {
   state.snapshots = [];
   state.predictedLocal = null;
   state.predictedTimers = { dashUntil: 0, dashCooldownUntil: 0 };
+  state.visualBall = null;
   state.prevInput = { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false };
   state.inputSeq = 0;
   state.lastAckSeq = 0;
@@ -182,25 +184,28 @@ function reconcileLocalFromServer(payload) {
     const dy = auth.y - state.predictedLocal.y;
     const dist = Math.hypot(dx, dy);
 
-    if (dist > 140) {
+    // Visual smoothness first: ignore tiny mismatches, softly trim medium drift,
+    // and only hard-correct when we are clearly desynced.
+    if (dist > 180) {
       state.predictedLocal.x = auth.x;
       state.predictedLocal.y = auth.y;
+    } else if (dist > 96) {
+      state.predictedLocal.x += dx * 0.08;
+      state.predictedLocal.y += dy * 0.08;
     } else if (dist > 48) {
-      state.predictedLocal.x += dx * 0.12;
-      state.predictedLocal.y += dy * 0.12;
-    } else if (dist > 10) {
-      state.predictedLocal.x += dx * 0.04;
-      state.predictedLocal.y += dy * 0.04;
+      state.predictedLocal.x += dx * 0.025;
+      state.predictedLocal.y += dy * 0.025;
     }
   }
 
   state.predictedTimers.dashCooldownUntil = now + (auth.dashCooldownRemainMs || 0);
   if (auth.dashing && state.predictedTimers.dashUntil < now + 50) {
-    state.predictedTimers.dashUntil = now + 140;
+    state.predictedTimers.dashUntil = now + 120;
   } else if (!auth.dashing && state.predictedTimers.dashUntil < now) {
     state.predictedTimers.dashUntil = 0;
   }
 }
+
 
 function getBounds(side) {
   const size = 84;
@@ -223,30 +228,48 @@ function updatePredictedLocal(dtMs) {
 
 function getRenderState() {
   if (!state.serverState) return null;
+  let out;
   if (state.snapshots.length < 2) {
-    const s = cloneObj(state.serverState);
-    if (state.mySide && state.predictedLocal) {
-      s.players[state.mySide].x = state.predictedLocal.x;
-      s.players[state.mySide].y = state.predictedLocal.y;
-    }
-    return s;
+    out = cloneObj(state.serverState);
+  } else {
+    const targetTime = Date.now() - state.renderDelayMs;
+    while (state.snapshots.length >= 3 && state.snapshots[1].serverTime <= targetTime) state.snapshots.shift();
+    const a = state.snapshots[0];
+    const b = state.snapshots[1] || a;
+    const span = Math.max(1, b.serverTime - a.serverTime);
+    const t = Math.max(0, Math.min(1, (targetTime - a.serverTime) / span));
+    out = cloneObj(b);
+    out.players.left = lerpPlayer(a.players.left, b.players.left, t);
+    out.players.right = lerpPlayer(a.players.right, b.players.right, t);
+    out.ball = lerpBall(a.ball, b.ball, t);
   }
-  const targetTime = Date.now() - state.renderDelayMs;
-  while (state.snapshots.length >= 3 && state.snapshots[1].serverTime <= targetTime) state.snapshots.shift();
-  const a = state.snapshots[0];
-  const b = state.snapshots[1] || a;
-  const span = Math.max(1, b.serverTime - a.serverTime);
-  const t = Math.max(0, Math.min(1, (targetTime - a.serverTime) / span));
-  const out = cloneObj(b);
-  out.players.left = lerpPlayer(a.players.left, b.players.left, t);
-  out.players.right = lerpPlayer(a.players.right, b.players.right, t);
-  out.ball = lerpBall(a.ball, b.ball, t);
+
   if (state.mySide && state.predictedLocal) {
     out.players[state.mySide].x = state.predictedLocal.x;
     out.players[state.mySide].y = state.predictedLocal.y;
   }
+
+  if (!state.visualBall) {
+    state.visualBall = { ...out.ball };
+  } else {
+    const dx = out.ball.x - state.visualBall.x;
+    const dy = out.ball.y - state.visualBall.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 140) {
+      state.visualBall.x = out.ball.x;
+      state.visualBall.y = out.ball.y;
+    } else {
+      state.visualBall.x += dx * 0.34;
+      state.visualBall.y += dy * 0.34;
+    }
+    state.visualBall.vx = out.ball.vx;
+    state.visualBall.vy = out.ball.vy;
+    state.visualBall.fire = out.ball.fire;
+  }
+  out.ball = { ...state.visualBall };
   return out;
 }
+
 
 function drawCooldownBar(x, y, width, remainMs, totalMs, label) {
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -433,5 +456,5 @@ window.addEventListener('blur', () => {
 updateConnection();
 updateKeybindUI();
 updateReadyTexts();
-setStatus('建立房間或加入房間，開始異地連線對戰');
+setStatus('建立房間或加入房間。此版本已優先降低本地操作回朔感。');
 (function loop(now){ const dt = now - state.lastFrameAt; state.lastFrameAt = now; updatePredictedLocal(dt); render(); requestAnimationFrame(loop); })(performance.now());
