@@ -19,7 +19,24 @@ const state = {
   inputSeq: 0,
   lastAckSeq: 0,
   pendingInputs: [],
-  ballPreview: { offsetX:0, offsetY:0, velX:0, velY:0, lastTriggerAt:0, activeUntil:0 }
+  ballPreview: { offsetX:0, offsetY:0, velX:0, velY:0, lastTriggerAt:0, activeUntil:0 },
+  predictedBall: null,
+  currentRenderState: null,
+  predictedSpecialUntil: 0,
+  predictedHitUntil: 0,
+  hitStopUntil: 0,
+  localStepMs: 1000/120,
+  localAccumulatorMs: 0,
+  lastLocalSimAt: performance.now(),
+  lastMoveInputAt: 0
+};
+
+const NET_CFG = {
+  moveSpeed: 405,
+  dashSpeed: 760,
+  dashDurationMs: 190,
+  dashCooldownMs: 1150,
+  specialDurationMs: 1400
 };
 
 const els = {
@@ -112,19 +129,76 @@ function updateKeybindUI() {
   els.dynamicHelp.textContent = `目前操作：移動 ${codeToText(state.keybinds.up)}/${codeToText(state.keybinds.left)}/${codeToText(state.keybinds.down)}/${codeToText(state.keybinds.right)}，擊球 ${codeToText(state.keybinds.hit)}，衝刺 ${codeToText(state.keybinds.dash)}，強化 ${codeToText(state.keybinds.special)}。房主固定左側，挑戰者固定右側。`;
 }
 
+
 function stepBallPreview(dtMs, nowMs) {
   const bp = state.ballPreview;
-  bp.offsetX *= 0.65;
-  bp.offsetY *= 0.65;
-  bp.velX = 0;
-  bp.velY = 0;
+  bp.offsetX *= 0.55;
+  bp.offsetY *= 0.55;
   if (Math.abs(bp.offsetX) < 0.05) bp.offsetX = 0;
   if (Math.abs(bp.offsetY) < 0.05) bp.offsetY = 0;
+
+  if (state.predictedBall) {
+    const dt = Math.min(0.03, dtMs / 1000);
+    state.predictedBall.x += state.predictedBall.vx * dt;
+    state.predictedBall.y += state.predictedBall.vy * dt;
+    state.predictedBall.vx *= 0.992;
+    state.predictedBall.vy *= 0.992;
+    const r = 18;
+    if (state.predictedBall.y - r <= 0) {
+      state.predictedBall.y = r;
+      state.predictedBall.vy = Math.abs(state.predictedBall.vy) * 0.94;
+    } else if (state.predictedBall.y + r >= 720) {
+      state.predictedBall.y = 720 - r;
+      state.predictedBall.vy = -Math.abs(state.predictedBall.vy) * 0.94;
+    }
+    if (nowMs >= state.predictedBall.until) state.predictedBall = null;
+  }
 }
 
 function maybeTriggerLocalBallPreview(renderState, nowMs) {
-  return;
+  state.currentRenderState = renderState;
 }
+
+function tryPredictedBallHit(nowMs) {
+  if (!state.mySide || !state.predictedLocal || !state.currentRenderState) return;
+  if (state.currentRenderState.phase !== 'playing') return;
+
+  const ball = state.visualBall || state.currentRenderState.ball;
+  if (!ball) return;
+
+  const local = state.predictedLocal;
+  const playerCx = local.x + 42;
+  const playerCy = local.y + 42;
+  const dx = ball.x - playerCx;
+  const dy = ball.y - playerCy;
+  const dist = Math.hypot(dx, dy);
+  const generousRadius = 86;
+  if (dist > generousRadius) return;
+
+  const toward = state.mySide === 'left' ? 1 : -1;
+  const movingX = (state.input.right ? 1 : 0) - (state.input.left ? 1 : 0);
+  const movingY = (state.input.down ? 1 : 0) - (state.input.up ? 1 : 0);
+  const specialOn = nowMs < state.predictedSpecialUntil;
+  const dashOn = nowMs < state.predictedTimers.dashUntil;
+  const baseSpeed = specialOn ? 820 : 585;
+  const powerBoost = dashOn ? 70 : 0;
+  const vx = toward * (baseSpeed + powerBoost + Math.abs(movingX) * 36);
+  const vy = (dy / generousRadius) * 185 + movingY * 72;
+
+  state.predictedBall = {
+    x: ball.x,
+    y: ball.y,
+    vx,
+    vy,
+    until: nowMs + (specialOn ? 170 : 105),
+    lockUntil: nowMs + (specialOn ? 95 : 45),
+    strong: specialOn,
+    fire: specialOn
+  };
+  state.predictedHitUntil = nowMs + (specialOn ? 165 : 120);
+  state.hitStopUntil = nowMs + (specialOn ? 36 : 0);
+}
+
 
 function emitInput() {
   if (!state.roomId) return;
@@ -164,13 +238,21 @@ function resetNetSmoothing() {
   state.lastAckSeq = 0;
   state.pendingInputs = [];
   state.ballPreview = { offsetX:0, offsetY:0, velX:0, velY:0, lastTriggerAt:0, activeUntil:0 };
+  state.predictedBall = null;
+  state.currentRenderState = null;
+  state.predictedSpecialUntil = 0;
+  state.predictedHitUntil = 0;
+  state.hitStopUntil = 0;
 }
 
 function applyPredictedStep(local, timers, input, prevInput, dtMs, nowMs) {
   if (!local) return;
   if (input.dash && !prevInput.dash && nowMs >= timers.dashCooldownUntil) {
-    timers.dashUntil = nowMs + 220;
-    timers.dashCooldownUntil = nowMs + 1150;
+    timers.dashUntil = nowMs + NET_CFG.dashDurationMs;
+    timers.dashCooldownUntil = nowMs + NET_CFG.dashCooldownMs;
+  }
+  if (input.special && !prevInput.special && nowMs >= state.predictedSpecialUntil) {
+    state.predictedSpecialUntil = nowMs + NET_CFG.specialDurationMs;
   }
   const dt = Math.min(0.03, dtMs / 1000);
   let mx = 0, my = 0;
@@ -180,7 +262,7 @@ function applyPredictedStep(local, timers, input, prevInput, dtMs, nowMs) {
   if (input.right) mx += 1;
   const l = Math.hypot(mx,my) || 1;
   const moving = mx !== 0 || my !== 0;
-  const speed = nowMs < timers.dashUntil ? 980 : 470;
+  const speed = nowMs < timers.dashUntil ? NET_CFG.dashSpeed : NET_CFG.moveSpeed;
   const vx = moving ? (mx / l) * speed : 0;
   const vy = moving ? (my / l) * speed : 0;
   const b = getBounds(state.mySide);
@@ -200,21 +282,24 @@ function reconcileLocalFromServer(payload) {
     const dx = auth.x - state.predictedLocal.x;
     const dy = auth.y - state.predictedLocal.y;
     const dist = Math.hypot(dx, dy);
+    const isActivelyMoving = state.input.up || state.input.down || state.input.left || state.input.right || now - state.lastMoveInputAt < 140;
 
-    // Local feel first:
-    // - tiny / medium mismatch: do not visually correct at all
-    // - large mismatch: only bias future motion very slightly
-    // - extreme mismatch: do a soft catch-up instead of visible snapping
-    if (dist > 260) {
-      state.predictedLocal.x += dx * 0.22;
-      state.predictedLocal.y += dy * 0.22;
-    } else if (dist > 140) {
-      state.predictedLocal.x += dx * 0.045;
-      state.predictedLocal.y += dy * 0.045;
+    // Hide almost all visual correction while the local player is actively moving.
+    // Only very large desyncs are softly corrected, never hard-snapped during play.
+    if (dist > 320) {
+      state.predictedLocal.x += dx * 0.12;
+      state.predictedLocal.y += dy * 0.12;
+    } else if (!isActivelyMoving && dist > 120) {
+      state.predictedLocal.x += dx * 0.08;
+      state.predictedLocal.y += dy * 0.08;
+    } else if (!isActivelyMoving && dist > 48) {
+      state.predictedLocal.x += dx * 0.035;
+      state.predictedLocal.y += dy * 0.035;
     }
   }
 
   state.predictedTimers.dashCooldownUntil = now + (auth.dashCooldownRemainMs || 0);
+  if (auth.empowered && state.predictedSpecialUntil < now + 80) state.predictedSpecialUntil = now + 320;
   if (auth.dashing && state.predictedTimers.dashUntil < now + 50) {
     state.predictedTimers.dashUntil = now + 120;
   } else if (!auth.dashing && state.predictedTimers.dashUntil < now) {
@@ -236,10 +321,21 @@ function updatePredictedLocal(dtMs) {
   if (!state.predictedLocal) {
     state.predictedLocal = { x: auth.x, y: auth.y };
     state.predictedTimers.dashCooldownUntil = performance.now() + auth.dashCooldownRemainMs;
-    state.predictedTimers.dashUntil = auth.dashing ? performance.now() + 140 : 0;
+    state.predictedTimers.dashUntil = auth.dashing ? performance.now() + 100 : 0;
   }
-  applyPredictedStep(state.predictedLocal, state.predictedTimers, state.input, state.prevInput, dtMs, performance.now());
-  state.prevInput = { ...state.input };
+
+  if (state.input.up || state.input.down || state.input.left || state.input.right) {
+    state.lastMoveInputAt = performance.now();
+  }
+
+  state.localAccumulatorMs += dtMs;
+  let safety = 0;
+  while (state.localAccumulatorMs >= state.localStepMs && safety < 6) {
+    applyPredictedStep(state.predictedLocal, state.predictedTimers, state.input, state.prevInput, state.localStepMs, state.lastFrameAt);
+    state.prevInput = { ...state.input };
+    state.localAccumulatorMs -= state.localStepMs;
+    safety++;
+  }
 }
 
 function getRenderState() {
@@ -264,30 +360,70 @@ function getRenderState() {
     out.players[state.mySide].x = state.predictedLocal.x;
     out.players[state.mySide].y = state.predictedLocal.y;
   }
+  const targetBall = out.ball;
 
   if (!state.visualBall) {
-    state.visualBall = { ...out.ball };
-  } else {
-    const dx = out.ball.x - state.visualBall.x;
-    const dy = out.ball.y - state.visualBall.y;
+    state.visualBall = { ...targetBall };
+  } else if (state.predictedBall) {
+    const nowMs = performance.now();
+    const dt = Math.min(0.03, (nowMs - Math.min(nowMs, state.lastFrameAt || nowMs)) / 1000) || 0.016;
+    // During a predicted hit window, let the local strong-hit feel lead the visual ball.
+    state.visualBall.x += state.predictedBall.vx * dt;
+    state.visualBall.y += state.predictedBall.vy * dt;
+    state.predictedBall.vx *= state.predictedBall.strong ? 0.994 : 0.991;
+    state.predictedBall.vy *= state.predictedBall.strong ? 0.994 : 0.991;
+
+    const remain = Math.max(0, state.predictedBall.until - nowMs);
+    const lockRemain = Math.max(0, state.predictedBall.lockUntil - nowMs);
+    const dx = targetBall.x - state.visualBall.x;
+    const dy = targetBall.y - state.visualBall.y;
     const dist = Math.hypot(dx, dy);
-    if (dist > 190) {
-      state.visualBall.x = out.ball.x;
-      state.visualBall.y = out.ball.y;
-    } else {
-      state.visualBall.x += dx * 0.30;
-      state.visualBall.y += dy * 0.30;
+
+    // First align velocity, not position, so strong hits do not look like
+    // "ball waited, then suddenly teleported fast".
+    const velBlend = lockRemain > 0 ? 0.12 : 0.24;
+    state.predictedBall.vx += (targetBall.vx - state.predictedBall.vx) * velBlend;
+    state.predictedBall.vy += (targetBall.vy - state.predictedBall.vy) * velBlend;
+
+    if (lockRemain <= 0) {
+      if (dist > 160) {
+        state.visualBall.x += dx * 0.35;
+        state.visualBall.y += dy * 0.35;
+      } else {
+        const posBlend = state.predictedBall.strong ? 0.10 : 0.16;
+        state.visualBall.x += dx * posBlend;
+        state.visualBall.y += dy * posBlend;
+      }
     }
-    state.visualBall.vx = out.ball.vx;
-    state.visualBall.vy = out.ball.vy;
-    state.visualBall.fire = out.ball.fire;
+
+    state.visualBall.vx = state.predictedBall.vx;
+    state.visualBall.vy = state.predictedBall.vy;
+    state.visualBall.fire = targetBall.fire || state.predictedBall.fire;
+
+    if (remain <= 0) {
+      state.predictedBall = null;
+    }
+  } else {
+    const dx = targetBall.x - state.visualBall.x;
+    const dy = targetBall.y - state.visualBall.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 220) {
+      state.visualBall.x = targetBall.x;
+      state.visualBall.y = targetBall.y;
+    } else {
+      state.visualBall.x += dx * 0.20;
+      state.visualBall.y += dy * 0.20;
+    }
+    state.visualBall.vx += (targetBall.vx - state.visualBall.vx) * 0.22;
+    state.visualBall.vy += (targetBall.vy - state.visualBall.vy) * 0.22;
+    state.visualBall.fire = targetBall.fire;
   }
 
   maybeTriggerLocalBallPreview(out, performance.now());
   out.ball = {
     ...state.visualBall,
-    x: state.visualBall.x,
-    y: state.visualBall.y
+    x: state.visualBall.x + state.ballPreview.offsetX,
+    y: state.visualBall.y + state.ballPreview.offsetY
   };
   return out;
 }
@@ -466,6 +602,10 @@ window.addEventListener('keydown', (e) => {
   }
   if (state.pauseOpen || !els.keybindModal.classList.contains('hidden')) return;
   setInputFromEvent(e.code, true);
+  const now = performance.now();
+  if ([state.keybinds.up,state.keybinds.down,state.keybinds.left,state.keybinds.right].includes(e.code)) state.lastMoveInputAt = now;
+  if (state.keybinds.special === e.code) state.predictedSpecialUntil = now + NET_CFG.specialDurationMs;
+  if (state.keybinds.hit === e.code) tryPredictedBallHit(now);
   emitInput();
 });
 window.addEventListener('keyup', (e) => { setInputFromEvent(e.code, false); emitInput(); });
@@ -478,5 +618,14 @@ window.addEventListener('blur', () => {
 updateConnection();
 updateKeybindUI();
 updateReadyTexts();
-setStatus('建立房間或加入房間。此版本加入球互動預演，碰球時畫面會先有即時反應，再平滑接回伺服器結果。');
-(function loop(now){ const dt = now - state.lastFrameAt; state.lastFrameAt = now; updatePredictedLocal(dt); stepBallPreview(dt, now); render(); requestAnimationFrame(loop); })(performance.now());
+setStatus('建立房間或加入房間。此版本先優化本地角色抖動：前端固定步長預測與伺服器速度對齊，減少被拉回感。');
+(function loop(now){
+  const dt = now - state.lastFrameAt;
+  state.lastFrameAt = now;
+  updatePredictedLocal(dt);
+  if (now >= state.hitStopUntil) {
+    stepBallPreview(dt, now);
+  }
+  render();
+  requestAnimationFrame(loop);
+})(performance.now());
