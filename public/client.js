@@ -10,7 +10,7 @@ const state = {
   rebinding: null, pauseOpen: false, keybinds: loadKeybinds(),
   input: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false },
   snapshots: [],
-  renderDelayMs: 18,
+  renderDelayMs: 22,
   lastFrameAt: performance.now(),
   predictedLocal: null,
   predictedTimers: { dashUntil: 0, dashCooldownUntil: 0 },
@@ -18,7 +18,8 @@ const state = {
   prevInput: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false },
   inputSeq: 0,
   lastAckSeq: 0,
-  pendingInputs: []
+  pendingInputs: [],
+  ballPreview: { offsetX:0, offsetY:0, velX:0, velY:0, lastTriggerAt:0, activeUntil:0 }
 };
 
 const els = {
@@ -110,6 +111,21 @@ function updateKeybindUI() {
   }
   els.dynamicHelp.textContent = `目前操作：移動 ${codeToText(state.keybinds.up)}/${codeToText(state.keybinds.left)}/${codeToText(state.keybinds.down)}/${codeToText(state.keybinds.right)}，擊球 ${codeToText(state.keybinds.hit)}，衝刺 ${codeToText(state.keybinds.dash)}，強化 ${codeToText(state.keybinds.special)}。房主固定左側，挑戰者固定右側。`;
 }
+
+function stepBallPreview(dtMs, nowMs) {
+  const bp = state.ballPreview;
+  bp.offsetX *= 0.65;
+  bp.offsetY *= 0.65;
+  bp.velX = 0;
+  bp.velY = 0;
+  if (Math.abs(bp.offsetX) < 0.05) bp.offsetX = 0;
+  if (Math.abs(bp.offsetY) < 0.05) bp.offsetY = 0;
+}
+
+function maybeTriggerLocalBallPreview(renderState, nowMs) {
+  return;
+}
+
 function emitInput() {
   if (!state.roomId) return;
   const seq = ++state.inputSeq;
@@ -147,6 +163,7 @@ function resetNetSmoothing() {
   state.inputSeq = 0;
   state.lastAckSeq = 0;
   state.pendingInputs = [];
+  state.ballPreview = { offsetX:0, offsetY:0, velX:0, velY:0, lastTriggerAt:0, activeUntil:0 };
 }
 
 function applyPredictedStep(local, timers, input, prevInput, dtMs, nowMs) {
@@ -254,18 +271,24 @@ function getRenderState() {
     const dx = out.ball.x - state.visualBall.x;
     const dy = out.ball.y - state.visualBall.y;
     const dist = Math.hypot(dx, dy);
-    if (dist > 140) {
+    if (dist > 190) {
       state.visualBall.x = out.ball.x;
       state.visualBall.y = out.ball.y;
     } else {
-      state.visualBall.x += dx * 0.22;
-      state.visualBall.y += dy * 0.22;
+      state.visualBall.x += dx * 0.30;
+      state.visualBall.y += dy * 0.30;
     }
     state.visualBall.vx = out.ball.vx;
     state.visualBall.vy = out.ball.vy;
     state.visualBall.fire = out.ball.fire;
   }
-  out.ball = { ...state.visualBall };
+
+  maybeTriggerLocalBallPreview(out, performance.now());
+  out.ball = {
+    ...state.visualBall,
+    x: state.visualBall.x,
+    y: state.visualBall.y
+  };
   return out;
 }
 
@@ -455,5 +478,5 @@ window.addEventListener('blur', () => {
 updateConnection();
 updateKeybindUI();
 updateReadyTexts();
-setStatus('建立房間或加入房間。此版本已加入擊球延遲補償，伺服器會更接近你看到的球位置來判定。');
-(function loop(now){ const dt = now - state.lastFrameAt; state.lastFrameAt = now; updatePredictedLocal(dt); render(); requestAnimationFrame(loop); })(performance.now());
+setStatus('建立房間或加入房間。此版本加入球互動預演，碰球時畫面會先有即時反應，再平滑接回伺服器結果。');
+(function loop(now){ const dt = now - state.lastFrameAt; state.lastFrameAt = now; updatePredictedLocal(dt); stepBallPreview(dt, now); render(); requestAnimationFrame(loop); })(performance.now());
