@@ -10,7 +10,7 @@ const state = {
   rebinding: null, pauseOpen: false, keybinds: loadKeybinds(),
   input: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false },
   snapshots: [],
-  renderDelayMs: 8,
+  renderDelayMs: 18,
   lastFrameAt: performance.now(),
   predictedLocal: null,
   predictedTimers: { dashUntil: 0, dashCooldownUntil: 0 },
@@ -455,5 +455,5 @@ window.addEventListener('blur', () => {
 updateConnection();
 updateKeybindUI();
 updateReadyTexts();
-setStatus('建立房間或加入房間。此版本已改成自身角色視覺即時優先，伺服器修正不直接呈現在畫面。');
+setStatus('建立房間或加入房間。此版本已加入擊球延遲補償，伺服器會更接近你看到的球位置來判定。');
 (function loop(now){ const dt = now - state.lastFrameAt; state.lastFrameAt = now; updatePredictedLocal(dt); render(); requestAnimationFrame(loop); })(performance.now());

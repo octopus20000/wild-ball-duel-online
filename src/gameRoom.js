@@ -74,6 +74,7 @@ class GameRoom {
     this.lastTickAt = Date.now();
     this.stateSeq = 0;
     this.roundTimer = null;
+    this.ballHistory = [];
     this.tickHandle = setInterval(() => this.tick(), Math.round(1000 / CONFIG.fps));
     this.broadcastHandle = setInterval(() => this.broadcastState(), Math.round(1000 / CONFIG.broadcastHz));
     this.broadcastLobby();
@@ -142,6 +143,7 @@ class GameRoom {
     this.ball.vy = (Math.random() * 180) - 90;
     this.ball.fireUntil = 0;
     this.ball.lastHitBy = null;
+    this.ballHistory = [];
   }
 
   serializeFor(socketId) {
@@ -257,10 +259,31 @@ class GameRoom {
     return null;
   }
 
+
+  pushBallHistory(now) {
+    this.ballHistory.push({ time: now, x: this.ball.x, y: this.ball.y, vx: this.ball.vx, vy: this.ball.vy });
+    const cutoff = now - CONFIG.ballHistoryMs;
+    while (this.ballHistory.length > 2 && this.ballHistory[0].time < cutoff) this.ballHistory.shift();
+  }
+
+  getLagCompBall(now, player) {
+    const rewindMs = Math.min(CONFIG.ballHistoryMs, CONFIG.lagCompHitRewindMs);
+    const target = now - rewindMs;
+    if (!this.ballHistory.length) return this.ball;
+    let best = this.ballHistory[0];
+    for (const snap of this.ballHistory) {
+      best = snap;
+      if (snap.time >= target) break;
+    }
+    return best;
+  }
+
   tick() {
     const now = Date.now();
     const dt = Math.min(0.02, (now - this.lastTickAt) / 1000);
     this.lastTickAt = now;
+
+    this.pushBallHistory(now);
 
     if (this.phase === 'playing') {
       this.updatePlayer(this.players.left, dt, now);
@@ -338,12 +361,18 @@ class GameRoom {
     const py = player.y;
     const pw = CONFIG.playerSize;
     const ph = CONFIG.playerSize;
-    const bx = this.ball.x;
-    const by = this.ball.y;
 
     const inHit = now <= player.hitUntil;
     const inSpecial = now <= player.specialUntil;
-    const collisionPadding = (inHit ? CONFIG.touchPaddingHit : CONFIG.touchPaddingIdle) + (inSpecial ? CONFIG.touchPaddingSpecial : 0);
+
+    const currentBall = { x: this.ball.x, y: this.ball.y, vx: this.ball.vx, vy: this.ball.vy };
+    const lagBall = inHit ? this.getLagCompBall(now, player) : currentBall;
+    const bx = lagBall.x;
+    const by = lagBall.y;
+
+    let collisionPadding = (inHit ? CONFIG.touchPaddingHit : CONFIG.touchPaddingIdle) + (inSpecial ? CONFIG.touchPaddingSpecial : 0);
+    if (inHit) collisionPadding += CONFIG.lagCompHitExtraRadius;
+    if (inSpecial) collisionPadding += CONFIG.lagCompSpecialExtraRadius;
     const topBoost = py < CONFIG.topBoostZoneY ? CONFIG.topBoostPadding : 0;
 
     const nearestX = Math.max(px - collisionPadding, Math.min(bx, px + pw + collisionPadding));
@@ -355,8 +384,8 @@ class GameRoom {
 
     const playerCx = px + pw / 2;
     const playerCy = py + ph / 2;
-    let nx = bx - playerCx;
-    let ny = by - playerCy;
+    let nx = currentBall.x - playerCx;
+    let ny = currentBall.y - playerCy;
     let nl = Math.hypot(nx, ny);
     if (nl < 0.0001) {
       nx = player.side === 'left' ? 1 : -1;
@@ -375,7 +404,7 @@ class GameRoom {
     const tangentialMove = (player.vx * tangent.x + player.vy * tangent.y) * 0.45;
     let power = inHit ? CONFIG.hitSpeed : CONFIG.softBounce;
     let boostX = toward * power;
-    let boostY = ((by - playerCy) / (ph / 2 || 1)) * 260 + tangentialMove + player.vy * 0.2;
+    let boostY = ((lagBall.y - playerCy) / (ph / 2 || 1)) * 260 + tangentialMove + player.vy * 0.2;
 
     if (now < player.dashUntil) {
       boostX *= 1.18;

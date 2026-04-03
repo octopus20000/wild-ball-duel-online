@@ -7,6 +7,10 @@ const FIELD = {
 const CONFIG = {
   fps: 90,
   broadcastHz: 40,
+  lagCompHitRewindMs: 80,
+  lagCompHitExtraRadius: 14,
+  lagCompSpecialExtraRadius: 8,
+  ballHistoryMs: 250,
   roundDelayMs: 1200,
   winningScore: 7,
   playerSize: 84,
