@@ -48,7 +48,8 @@ function makePlayer(side) {
     dashCooldownUntil: 0,
     specialUntil: 0,
     specialCooldownUntil: 0,
-    pingMs: 0
+    pingMs: 0,
+    lastProcessedInputSeq: 0
   };
 }
 
@@ -156,6 +157,7 @@ class GameRoom {
         left: this.exportPlayer(this.players.left),
         right: this.exportPlayer(this.players.right)
       },
+      lastProcessedInputSeq: mySide ? this.players[mySide].lastProcessedInputSeq : 0,
       ball: {
         x: this.ball.x,
         y: this.ball.y,
@@ -245,6 +247,7 @@ class GameRoom {
     for (const key of ['up', 'down', 'left', 'right', 'hit', 'dash', 'special']) {
       p.input[key] = !!payload[key];
     }
+    if (Number.isFinite(payload.seq)) p.lastProcessedInputSeq = payload.seq;
   }
 
   findPlayer(socketId) {

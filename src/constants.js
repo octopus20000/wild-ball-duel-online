@@ -5,8 +5,8 @@ const FIELD = {
 };
 
 const CONFIG = {
-  fps: 60,
-  broadcastHz: 30,
+  fps: 90,
+  broadcastHz: 45,
   roundDelayMs: 1200,
   winningScore: 7,
   playerSize: 84,

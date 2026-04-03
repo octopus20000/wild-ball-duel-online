@@ -10,11 +10,14 @@ const state = {
   rebinding: null, pauseOpen: false, keybinds: loadKeybinds(),
   input: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false },
   snapshots: [],
-  renderDelayMs: 100,
+  renderDelayMs: 55,
   lastFrameAt: performance.now(),
   predictedLocal: null,
   predictedTimers: { dashUntil: 0, dashCooldownUntil: 0 },
-  prevInput: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false }
+  prevInput: { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false },
+  inputSeq: 0,
+  lastAckSeq: 0,
+  pendingInputs: []
 };
 
 const els = {
@@ -106,7 +109,14 @@ function updateKeybindUI() {
   }
   els.dynamicHelp.textContent = `目前操作：移動 ${codeToText(state.keybinds.up)}/${codeToText(state.keybinds.left)}/${codeToText(state.keybinds.down)}/${codeToText(state.keybinds.right)}，擊球 ${codeToText(state.keybinds.hit)}，衝刺 ${codeToText(state.keybinds.dash)}，強化 ${codeToText(state.keybinds.special)}。房主固定左側，挑戰者固定右側。`;
 }
-function emitInput() { if (state.roomId) socket.emit('player:input', state.input); }
+function emitInput() {
+  if (!state.roomId) return;
+  const seq = ++state.inputSeq;
+  const snapshot = { ...state.input };
+  const stamped = { seq, sentAt: performance.now(), input: snapshot };
+  state.pendingInputs.push(stamped);
+  socket.emit('player:input', { seq, ...snapshot });
+}
 function setInputFromEvent(code, isDown) {
   for (const action of ACTIONS) if (state.keybinds[action] === code) state.input[action] = isDown;
 }
@@ -135,7 +145,79 @@ function resetNetSmoothing() {
   state.predictedLocal = null;
   state.predictedTimers = { dashUntil: 0, dashCooldownUntil: 0 };
   state.prevInput = { up:false, down:false, left:false, right:false, hit:false, dash:false, special:false };
+  state.inputSeq = 0;
+  state.lastAckSeq = 0;
+  state.pendingInputs = [];
 }
+
+function applyPredictedStep(local, timers, input, prevInput, dtMs, nowMs) {
+  if (!local) return;
+  if (input.dash && !prevInput.dash && nowMs >= timers.dashCooldownUntil) {
+    timers.dashUntil = nowMs + 220;
+    timers.dashCooldownUntil = nowMs + 1150;
+  }
+  const dt = Math.min(0.03, dtMs / 1000);
+  let mx = 0, my = 0;
+  if (input.up) my -= 1;
+  if (input.down) my += 1;
+  if (input.left) mx -= 1;
+  if (input.right) mx += 1;
+  const l = Math.hypot(mx,my) || 1;
+  const moving = mx !== 0 || my !== 0;
+  const speed = nowMs < timers.dashUntil ? 980 : 470;
+  const vx = moving ? (mx / l) * speed : 0;
+  const vy = moving ? (my / l) * speed : 0;
+  const b = getBounds(state.mySide);
+  local.x = Math.max(b.minX, Math.min(b.maxX, local.x + vx * dt));
+  local.y = Math.max(b.minY, Math.min(b.maxY, local.y + vy * dt));
+}
+
+function reconcileLocalFromServer(payload) {
+  if (!payload.mySide) return;
+  const auth = payload.players[payload.mySide];
+  const ack = payload.lastProcessedInputSeq || 0;
+  state.lastAckSeq = ack;
+  state.pendingInputs = state.pendingInputs.filter(entry => entry.seq > ack);
+
+  const now = performance.now();
+  const baseLocal = { x: auth.x, y: auth.y };
+  const baseTimers = {
+    dashCooldownUntil: now + (auth.dashCooldownRemainMs || 0),
+    dashUntil: auth.dashing ? now + 140 : 0
+  };
+
+  let replayPrev = { ...state.prevInput };
+  let cursorTime = now;
+  if (state.pendingInputs.length > 0) {
+    replayPrev = { ...state.pendingInputs[0].input };
+    cursorTime = state.pendingInputs[0].sentAt;
+  }
+
+  for (let i = 0; i < state.pendingInputs.length; i++) {
+    const current = state.pendingInputs[i];
+    const nextTime = i + 1 < state.pendingInputs.length ? state.pendingInputs[i + 1].sentAt : now;
+    const dtMs = Math.max(0, nextTime - current.sentAt);
+    applyPredictedStep(baseLocal, baseTimers, current.input, replayPrev, dtMs, current.sentAt);
+    replayPrev = current.input;
+    cursorTime = nextTime;
+  }
+
+  if (!state.predictedLocal) {
+    state.predictedLocal = baseLocal;
+  } else {
+    const dx = baseLocal.x - state.predictedLocal.x;
+    const dy = baseLocal.y - state.predictedLocal.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 95) {
+      state.predictedLocal = baseLocal;
+    } else if (dist > 1.5) {
+      state.predictedLocal.x += dx * 0.35;
+      state.predictedLocal.y += dy * 0.35;
+    }
+  }
+  state.predictedTimers = baseTimers;
+}
+
 function getBounds(side) {
   const size = 84;
   return side === 'left'
@@ -150,29 +232,10 @@ function updatePredictedLocal(dtMs) {
     state.predictedTimers.dashCooldownUntil = performance.now() + auth.dashCooldownRemainMs;
     state.predictedTimers.dashUntil = auth.dashing ? performance.now() + 140 : 0;
   }
-  const now = performance.now();
-  if (state.input.dash && !state.prevInput.dash && now >= state.predictedTimers.dashCooldownUntil) {
-    state.predictedTimers.dashUntil = now + 220;
-    state.predictedTimers.dashCooldownUntil = now + 1150;
-  }
-  const dt = Math.min(0.03, dtMs / 1000);
-  let mx = 0, my = 0;
-  if (state.input.up) my -= 1;
-  if (state.input.down) my += 1;
-  if (state.input.left) mx -= 1;
-  if (state.input.right) mx += 1;
-  const l = Math.hypot(mx,my) || 1;
-  const moving = mx !== 0 || my !== 0;
-  const speed = now < state.predictedTimers.dashUntil ? 980 : 470;
-  const vx = moving ? (mx / l) * speed : 0;
-  const vy = moving ? (my / l) * speed : 0;
-  const b = getBounds(state.mySide);
-  state.predictedLocal.x = Math.max(b.minX, Math.min(b.maxX, state.predictedLocal.x + vx * dt));
-  state.predictedLocal.y = Math.max(b.minY, Math.min(b.maxY, state.predictedLocal.y + vy * dt));
-  state.predictedLocal.x = lerp(state.predictedLocal.x, auth.x, 0.12);
-  state.predictedLocal.y = lerp(state.predictedLocal.y, auth.y, 0.12);
+  applyPredictedStep(state.predictedLocal, state.predictedTimers, state.input, state.prevInput, dtMs, performance.now());
   state.prevInput = { ...state.input };
 }
+
 function getRenderState() {
   if (!state.serverState) return null;
   if (state.snapshots.length < 2) {
@@ -278,11 +341,7 @@ function updateServerState(payload) {
   state.mySide = payload.mySide;
   state.snapshots.push(cloneObj(payload));
   if (state.snapshots.length > 6) state.snapshots.shift();
-  if (!state.predictedLocal || !state.mySide) {
-    state.predictedLocal = { x: payload.players[payload.mySide]?.x || 0, y: payload.players[payload.mySide]?.y || 0 };
-    state.predictedTimers.dashCooldownUntil = performance.now() + (payload.players[payload.mySide]?.dashCooldownRemainMs || 0);
-    state.predictedTimers.dashUntil = payload.players[payload.mySide]?.dashing ? performance.now() + 140 : 0;
-  }
+  reconcileLocalFromServer(payload);
   els.roomIdText.textContent = payload.roomId || '-';
   els.mySideText.textContent = payload.mySide === 'left' ? '左側（房主）' : payload.mySide === 'right' ? '右側（挑戰者）' : '-';
   els.scoreLeft.textContent = payload.score.left;
